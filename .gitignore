@@ -1,3 +1,13 @@
 .venv/
 /.cursor/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+*.pyc
+.DS_Store
+run.log
+outputs/data/*
+!outputs/data/.gitkeep
+outputs/figures/*
+!outputs/figures/.gitkeep
 

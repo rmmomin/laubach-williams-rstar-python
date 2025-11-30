@@ -33,11 +33,41 @@ literature-inspired priors to avoid the pile-up-at-zero problem.
 """
 
 import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
 from dataclasses import dataclass
 from typing import Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DATA_OUTPUT_DIR = OUTPUT_DIR / "data"
+FIGURE_OUTPUT_DIR = OUTPUT_DIR / "figures"
+
+
+def ensure_output_dirs() -> None:
+    """Create output directories if missing."""
+    for path in (DATA_OUTPUT_DIR, FIGURE_OUTPUT_DIR):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def save_results_dataframe(results: pd.DataFrame, filename: str = "synthetic_demo_results.csv") -> Path:
+    """Persist smoothed-state dataframe to CSV and return the path."""
+    ensure_output_dirs()
+    csv_path = DATA_OUTPUT_DIR / filename
+    results.to_csv(csv_path, index_label="date")
+    print(f"Saved smoothed states to {csv_path}")
+    return csv_path
+
+
+def save_figure(fig, filename: str = "synthetic_demo.png") -> Path:
+    """Persist matplotlib figure to disk and return the path."""
+    ensure_output_dirs()
+    fig_path = FIGURE_OUTPUT_DIR / filename
+    fig.savefig(fig_path, dpi=150)
+    print(f"Saved plot to {fig_path}")
+    return fig_path
 
 # ---------------------------------------------------------------------
 # 1. Kalman filter and smoother
@@ -456,6 +486,7 @@ def main():
 
     print("\nFirst few smoothed states (posterior-mean params):")
     print(results.head())
+    save_results_dataframe(results)
 
     # Optional plotting
     try:
@@ -479,7 +510,9 @@ def main():
         axs[2].set_title("Real Rate vs r*")
 
         plt.tight_layout()
+        save_figure(fig)
         plt.show()
+        plt.close(fig)
     except ImportError:
         print("matplotlib not installed; skipping plots.")
 
