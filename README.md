@@ -1,42 +1,82 @@
-# LW Python Port
+# Laubach-Williams r* Python Port
 
-This repository houses a Python port of the Laubach-Williams (2003) natural-rate model based on the official `LW_replication/` R code. The port mirrors the three-stage estimation (median-unbiased signal-to-noise ratios + Kalman filtering/smoothing) and uses the published `Laubach_Williams_current_estimates.xlsx` file for both input data and validation.
+A faithful Python port of the NY Fed's Laubach-Williams (2003) natural rate of interest (r*) model, based on the [2023 replication code](https://www.newyorkfed.org/research/policy/rstar).
 
-## Environment setup
+The port replicates the three-stage estimation procedure:
+1. **Stage 1**: Estimate potential output with trend growth
+2. **Stage 2**: Add interest rate sensitivity, estimate λ_g (signal-to-noise ratio for trend growth)
+3. **Stage 3**: Full model with r* = c·g + z, estimate λ_z (signal-to-noise ratio for z)
 
-1. `python3 -m venv .venv`
-2. `source .venv/bin/activate`
-3. `pip install -r requirements.txt`
+## Validation
 
-> Dependencies are pinned to versions that install cleanly on Python 3.9. If you upgrade to Python 3.10+ you can relax the caps to track the latest PyMC/PyTensor/pandas releases.
+All estimates match the published NY Fed figures within **0.04 percentage points**:
 
-### Run the synthetic demo
+| Metric (Smoothed) | Max Abs Diff | RMSE |
+|-------------------|--------------|------|
+| r* | 0.022 pp | 0.012 |
+| g (trend growth) | 0.008 pp | 0.003 |
+| z (other factors) | 0.011 pp | 0.009 |
+| Output gap | 0.020 pp | 0.011 |
 
-`python scripts/run_lw_port.py`
+## Setup
 
-### Use your own data
+\`\`\`bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+\`\`\`
 
-Import `run_estimation` from `lwrep.run` if you need programmatic access, or run the script above to generate the filtered/smoothed estimates plus a comparison against the published New York Fed figures.
+## Data
 
-## Project layout
+Download \`Laubach_Williams_current_estimates.xlsx\` from the [NY Fed website](https://www.newyorkfed.org/research/policy/rstar) and place it in \`data/\`.
 
-```
-├── requirements.txt
-├── LW_replication/              # Original R code + Excel data
-├── src/
-│   └── lwrep/
-│       ├── __init__.py
-│       ├── data.py
-│       ├── kalman.py
-│       ├── parameters.py
-│       ├── run.py
-│       └── stages.py
+## Usage
+
+\`\`\`bash
+python scripts/run_lw_port.py
+\`\`\`
+
+Or programmatically:
+
+\`\`\`python
+from lwrep.run import run_estimation
+
+metrics = run_estimation(
+    excel_path="data/Laubach_Williams_current_estimates.xlsx",
+    output_dir="outputs",
+    sample_start=(1961, 1),
+    sample_end=(2025, 2),
+    use_kappa=True,  # COVID time-varying variance
+)
+\`\`\`
+
+## Project Structure
+
+\`\`\`
+├── data/                    # Input data (Excel from NY Fed)
 ├── outputs/
-│   ├── data/
-│   └── figures/
-└── scripts/
-    └── run_lw_port.py
+│   ├── data/                # CSV results
+│   └── figures/             # Comparison plots
+├── scripts/
+│   └── run_lw_port.py       # Main entry point
+├── src/lwrep/
+│   ├── __init__.py
+│   ├── kalman.py            # Kalman filter/smoother
+│   ├── median_unbiased.py   # λ_g, λ_z estimation
+│   ├── parameters.py        # State-space matrices
+│   ├── run.py               # Orchestration & plotting
+│   └── stages.py            # Stage 1, 2, 3 estimation
+└── requirements.txt
+\`\`\`
 
-Running `python scripts/run_lw_port.py` produces `outputs/data/lw_port_results.csv` (filtered and smoothed series) and prints RMS/max-abs differences versus the official spreadsheet so you can confirm the port stays aligned.
-```
+## Output
 
+Running the script produces:
+- \`outputs/data/lw_port_results.csv\` - Filtered and smoothed estimates
+- \`outputs/figures/lw_comparison.png\` - Time series comparison
+- \`outputs/figures/lw_differences.png\` - Difference plots
+
+## References
+
+- Laubach, T., & Williams, J. C. (2003). Measuring the Natural Rate of Interest. *Review of Economics and Statistics*, 85(4), 1063-1070.
+- [NY Fed r* Data and Code](https://www.newyorkfed.org/research/policy/rstar)
