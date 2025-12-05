@@ -1,7 +1,5 @@
 .venv/
 /.cursor/
-LW_replication/
-LW_2023_Replication_Code/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
