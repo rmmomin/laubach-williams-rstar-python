@@ -225,7 +225,7 @@ def rstar_stage1(
     # Initialize xi_00 from HP filter if not provided
     if xi_00 is None:
         print("Stage 1: xi.00 from HP trend in log output")
-        g_pot, _ = hpfilter(y_og, lamb=36000)
+        _, g_pot = hpfilter(y_og, lamb=36000)
         xi_00 = np.array([100 * g_pot[3], 100 * g_pot[2], 100 * g_pot[1]])
     else:
         print("Stage 1: Using xi.00 input")
@@ -431,7 +431,7 @@ def rstar_stage2(
     # Initialize xi_00 from HP filter
     if xi_00 is None:
         print("Stage 2: xi.00 from HP trend in log output")
-        g_pot, _ = hpfilter(y_og, lamb=36000)
+        _, g_pot = hpfilter(y_og, lamb=36000)
         g_pot_diff = np.diff(g_pot)
         xi_00 = np.array([
             100 * g_pot[3], 100 * g_pot[2], 100 * g_pot[1],
@@ -736,7 +736,7 @@ def rstar_stage3(
     # Initialize xi_00 from HP filter
     if xi_00 is None:
         print("Stage 3: xi.00 from HP trend in log output")
-        g_pot, _ = hpfilter(y_og, lamb=36000)
+        _, g_pot = hpfilter(y_og, lamb=36000)
         g_pot_diff = np.diff(g_pot)
         xi_00 = np.array([
             100 * g_pot[3], 100 * g_pot[2], 100 * g_pot[1],
