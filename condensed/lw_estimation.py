@@ -1091,7 +1091,7 @@ def run_estimation(
     print(f"  phi = {phi:.6f}")
     
     t_end = len(log_output) - 8
-    dates = pd.date_range(start=f"{sample_start[0]}-{sample_start[1]*3:02d}-01", periods=t_end, freq="QS")
+    dates = pd.date_range(start=f"{sample_start[0]}-{(sample_start[1]-1)*3+1:02d}-01", periods=t_end, freq="QS")
     
     results = pd.DataFrame({
         "Date": dates,
