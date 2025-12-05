@@ -1,6 +1,6 @@
 # LW Python Port
 
-This repository exists to build a Python port of the Laubach-Williams (2003) natural-rate model using Bayesian state-space estimation. The core implementation now lives in `src/laubach_williams_rstar/model.py`, which combines custom Kalman filtering with PyMC priors that mirror the original literature.
+This repository houses a Python port of the Laubach-Williams (2003) natural-rate model based on the official `LW_replication/` R code. The port mirrors the three-stage estimation (median-unbiased signal-to-noise ratios + Kalman filtering/smoothing) and uses the published `Laubach_Williams_current_estimates.xlsx` file for both input data and validation.
 
 ## Environment setup
 
@@ -12,26 +12,31 @@ This repository exists to build a Python port of the Laubach-Williams (2003) nat
 
 ### Run the synthetic demo
 
-`python scripts/run_example.py`
+`python scripts/run_lw_port.py`
 
 ### Use your own data
 
-Import `run_bayesian_lw` or `main` from `laubach_williams_rstar.model`, feed in your quarterly `log_gdp`, `pi`, and `r_real` arrays, and swap out the synthetic block in `model.py` (or supply your own driver script in `scripts/`).
+Import `run_estimation` from `lwrep.run` if you need programmatic access, or run the script above to generate the filtered/smoothed estimates plus a comparison against the published New York Fed figures.
 
 ## Project layout
 
 ```
 ├── requirements.txt
+├── LW_replication/              # Original R code + Excel data
 ├── src/
-│   └── laubach_williams_rstar/
+│   └── lwrep/
 │       ├── __init__.py
-│       └── model.py
+│       ├── data.py
+│       ├── kalman.py
+│       ├── parameters.py
+│       ├── run.py
+│       └── stages.py
 ├── outputs/
 │   ├── data/
 │   └── figures/
 └── scripts/
-    └── run_example.py
+    └── run_lw_port.py
 
-Running `python scripts/run_example.py` now drops a CSV of smoothed states under `outputs/data/` and a PNG of the three-panel chart under `outputs/figures/`. The directories are created automatically if they don't exist.
+Running `python scripts/run_lw_port.py` produces `outputs/data/lw_port_results.csv` (filtered and smoothed series) and prints RMS/max-abs differences versus the official spreadsheet so you can confirm the port stays aligned.
 ```
 
