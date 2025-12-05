@@ -10,7 +10,7 @@ from .utils import PreparedInput, ensure_1d, shift_quarter, to_period
 
 
 DEFAULT_SAMPLE_START = (1961, 1)
-DEFAULT_SAMPLE_END = (2019, 2)
+DEFAULT_SAMPLE_END = (2025, 2)
 PRE_SAMPLE_QUARTERS = 8
 
 
@@ -51,6 +51,7 @@ def load_input_data(
     log_output = ensure_1d(trimmed["gdp.log"])
     inflation_exp = ensure_1d(trimmed["inflation.expectations"])
     real_rate = ensure_1d(trimmed["interest"] - trimmed["inflation.expectations"])
+    covid_ind = ensure_1d(trimmed["covid.ind"])
 
     all_periods = pd.PeriodIndex(trimmed["Date"], freq="Q")
     sample_periods = all_periods[PRE_SAMPLE_QUARTERS:]
@@ -62,9 +63,9 @@ def load_input_data(
         rel_import_inflation=rel_import,
         real_interest_rate=real_rate,
         inflation_expectations=inflation_exp,
+        covid_indicator=covid_ind,
         all_periods=all_periods,
         sample_periods=sample_periods,
         sample_start=sample_start_period,
         sample_end=sample_end_period,
     )
-

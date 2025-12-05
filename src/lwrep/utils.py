@@ -60,6 +60,7 @@ class PreparedInput:
     rel_import_inflation: np.ndarray
     real_interest_rate: np.ndarray
     inflation_expectations: np.ndarray
+    covid_indicator: np.ndarray
     all_periods: pd.PeriodIndex
     sample_periods: pd.PeriodIndex
     sample_start: Quarter
@@ -73,4 +74,73 @@ class PreparedInput:
 
 def ensure_1d(array: Iterable[float]) -> np.ndarray:
     return np.asarray(array, dtype=float).reshape(-1)
+
+
+@dataclass
+class KappaConfig:
+    """Configuration for time-varying variance (kappa) during COVID period."""
+    name: str
+    year: int
+    T_start: int
+    T_end: int
+    init: float = 1.0
+    lower_bound: float = 1.0
+    upper_bound: float = float("inf")
+    theta_index: int = -1
+
+
+def build_default_kappa_inputs(sample_start: Tuple[int, int]) -> list:
+    """
+    Build default kappa inputs for 2020-2022 COVID variance scaling.
+    Matches R code kappa.inputs data.frame.
+    """
+    kappas = []
+    for year in [2020, 2021, 2022]:
+        # Calculate T.start and T.end relative to sample_start
+        start_offset = (year - sample_start[0]) * 4 + (1 - sample_start[1])
+        T_start = max(start_offset + 1, 0)
+        T_end = max(start_offset + 4, 0)
+        
+        # Manual adjustment: kappa_2020 starts in Q2
+        if year == 2020:
+            T_start += 1
+        
+        kappas.append(KappaConfig(
+            name=f"kappa{year}Q2-Q4" if year == 2020 else f"kappa{year}",
+            year=year,
+            T_start=T_start,
+            T_end=T_end,
+        ))
+    return kappas
+
+
+def hp_filter(y: np.ndarray, lamb: float = 36000.0) -> np.ndarray:
+    """
+    Hodrick-Prescott filter for trend extraction.
+    
+    Parameters
+    ----------
+    y : np.ndarray
+        Time series to filter.
+    lamb : float
+        Smoothing parameter (default 36000 for quarterly data, matching R code).
+    
+    Returns
+    -------
+    np.ndarray
+        Trend component.
+    """
+    n = len(y)
+    # Build the second difference matrix
+    D = np.zeros((n - 2, n))
+    for i in range(n - 2):
+        D[i, i] = 1
+        D[i, i + 1] = -2
+        D[i, i + 2] = 1
+    
+    # Solve (I + lamb * D'D) * trend = y
+    I = np.eye(n)
+    A = I + lamb * (D.T @ D)
+    trend = np.linalg.solve(A, y)
+    return trend
 

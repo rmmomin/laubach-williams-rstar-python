@@ -1,7 +1,14 @@
+"""
+State-space parameter builders for LW 2023 replication.
+
+Stage 1: 3 states [y*, y*_{t-1}, y*_{t-2}], 12 base params
+Stage 2: 6 states [y*, y*_{t-1}, y*_{t-2}, g, g_{t-1}, g_{t-2}], 14 base params
+Stage 3: 9 states [y*, y*_{t-1}, y*_{t-2}, g, g_{t-1}, g_{t-2}, z, z_{t-1}, z_{t-2}], 13 base params
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 from scipy.optimize import minimize
@@ -17,377 +24,315 @@ class StateSpace:
     H: np.ndarray
     R: np.ndarray
     cons: np.ndarray
+    kappa_vec: np.ndarray
 
 
-def _matrix_power(mat: np.ndarray, power: int) -> np.ndarray:
-    if power == 0:
-        return np.eye(mat.shape[0])
-    result = np.eye(mat.shape[0])
-    base = mat.copy()
-    p = power
-    while p > 0:
-        if p % 2 == 1:
-            result = result @ base
-        base = base @ base
-        p //= 2
-    return result
+# Parameter index mappings (0-indexed, matching R param.num - 1)
+PARAM_NUM_STAGE1 = {
+    "a_1": 0, "a_2": 1, "b_1": 2, "b_2": 3, "b_3": 4, "b_4": 5, "b_5": 6,
+    "g": 7, "sigma_1": 8, "sigma_2": 9, "sigma_4": 10, "phi": 11,
+}
+
+PARAM_NUM_STAGE2 = {
+    "a_1": 0, "a_2": 1, "a_3": 2, "a_4": 3, "a_5": 4,
+    "b_1": 5, "b_2": 6, "b_3": 7, "b_4": 8, "b_5": 9,
+    "sigma_1": 10, "sigma_2": 11, "sigma_4": 12, "phi": 13,
+}
+
+PARAM_NUM_STAGE3 = {
+    "a_1": 0, "a_2": 1, "a_3": 2,
+    "b_1": 3, "b_2": 4, "b_3": 5, "b_4": 6, "b_5": 7,
+    "c": 8, "sigma_1": 9, "sigma_2": 10, "sigma_4": 11, "phi": 12,
+}
 
 
-def _initialize_stage1(
-    A: np.ndarray,
-    H: np.ndarray,
-    F: np.ndarray,
-    Q: np.ndarray,
-    R: np.ndarray,
-    cons: np.ndarray,
-    y_data: np.ndarray,
-    x_data: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    Ht = H.T
-    F1 = F
-    F2 = F @ F
-    F3 = F2 @ F
-    x_stack = np.vstack([Ht, Ht @ F1, Ht @ F2, Ht @ F3])
-    om = np.zeros((8, 8))
-
-    om[np.ix_(range(4, 6), range(2, 4))] = Ht @ F1 @ Q @ H
-    om[np.ix_(range(6, 8), range(2, 4))] = Ht @ F2 @ Q @ H
-    om[np.ix_(range(6, 8), range(4, 6))] = Ht @ (F2 @ Q @ F1.T + F1 @ Q) @ H
-
-    om = om + om.T
-    om[np.ix_(range(0, 2), range(0, 2))] = R
-    om[np.ix_(range(2, 4), range(2, 4))] = Ht @ Q @ H + R
-    om[np.ix_(range(4, 6), range(4, 6))] = Ht @ (F1 @ Q @ F1.T + Q) @ H + R
-    om[np.ix_(range(6, 8), range(6, 8))] = Ht @ (F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q) @ H + R
-
-    p1 = x_stack.T @ np.linalg.solve(om, x_stack)
-    yy = np.concatenate([y_data[i] for i in range(4)])
-
-    tmp = np.concatenate(
-        [
-            A.T @ x_data[0],
-            A.T @ x_data[1] + Ht @ cons,
-            A.T @ x_data[2] + Ht @ cons + Ht @ F1 @ cons,
-            A.T @ x_data[3] + Ht @ (np.eye(F.shape[0]) + F1 + F2) @ cons,
-        ]
-    )
-    diff = yy - tmp
-    xi0 = np.linalg.solve(p1, x_stack.T @ np.linalg.solve(om, diff))
-    resid = diff - x_stack @ xi0
-    scale = np.sum(resid**2) / 3.0
-    P0 = np.linalg.solve(p1, np.eye(3) * scale)
-    return xi0, P0
+def build_kappa_vector(
+    T: int,
+    parameters: np.ndarray,
+    use_kappa: bool,
+    kappa_inputs: list,
+    n_base_params: int,
+) -> np.ndarray:
+    """Build the time-varying variance scale vector."""
+    kappa_vec = np.ones(T)
+    if use_kappa and kappa_inputs:
+        for k, kappa_cfg in enumerate(kappa_inputs):
+            theta_idx = n_base_params + k
+            if theta_idx < len(parameters):
+                T_start = kappa_cfg.T_start
+                T_end = min(kappa_cfg.T_end, T - 1)
+                if T_start < T and T_end >= T_start:
+                    kappa_vec[T_start : T_end + 1] = parameters[theta_idx]
+    return kappa_vec
 
 
 def build_stage1_system(
-    theta: np.ndarray,
+    parameters: np.ndarray,
     y_data: np.ndarray,
     x_data: np.ndarray,
-    xi0: Optional[np.ndarray] = None,
-    P0: Optional[np.ndarray] = None,
+    xi0: np.ndarray,
+    P0: np.ndarray,
+    use_kappa: bool = True,
+    kappa_inputs: Optional[list] = None,
 ) -> StateSpace:
-    A = np.zeros((7, 2))
-    A[0:2, 0] = theta[0:2]
-    A[0, 1] = theta[4]
-    A[2:4, 1] = theta[2:4]
-    A[4, 1] = 1.0 - np.sum(A[2:4, 1])
-    A[5:7, 1] = theta[5:7]
-
-    H = np.zeros((3, 2))
+    """
+    Build stage 1 state-space system matrices.
+    Stage 1 has 3 state variables: [y*, y*_{t-1}, y*_{t-2}]
+    x_data has 10 columns.
+    """
+    n_state = 3
+    T = y_data.shape[0]
+    p = PARAM_NUM_STAGE1
+    
+    # A matrix: 10 x 2
+    A = np.zeros((10, 2))
+    A[0, 0] = parameters[p["a_1"]]  # a_y,1
+    A[1, 0] = parameters[p["a_2"]]  # a_y,2
+    A[0, 1] = parameters[p["b_3"]]  # b_y
+    A[2, 1] = parameters[p["b_1"]]  # b_{pi,1}
+    A[3, 1] = parameters[p["b_2"]]  # b_{pi,2-4}
+    A[4, 1] = 1.0 - A[2, 1] - A[3, 1]
+    A[5, 1] = parameters[p["b_4"]]  # b_oil
+    A[6, 1] = parameters[p["b_5"]]  # b_import
+    A[7, 0] = parameters[p["phi"]]  # phi
+    A[8, 0] = -parameters[p["a_1"]] * parameters[p["phi"]]  # -a_1*phi
+    A[8, 1] = -parameters[p["b_3"]] * parameters[p["phi"]]  # -b_3*phi
+    A[9, 0] = -parameters[p["a_2"]] * parameters[p["phi"]]  # -a_2*phi
+    
+    # H matrix: 3 x 2
+    H = np.zeros((n_state, 2))
     H[0, 0] = 1.0
-    H[1:3, 0] = -theta[0:2]
-    H[1, 1] = -theta[4]
-
-    R = np.diag([theta[8] ** 2, theta[9] ** 2])
-    Q = np.zeros((3, 3))
-    Q[0, 0] = theta[10] ** 2
-
-    F = np.zeros((3, 3))
-    F[0, 0] = F[1, 0] = F[2, 1] = 1.0
-
-    cons = np.zeros(3)
-    cons[0] = theta[7]
-
-    if xi0 is None or P0 is None:
-        xi0, P0 = _initialize_stage1(A, H, F, Q, R, cons, y_data, x_data)
-
-    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons)
-
-
-def _initialize_stage2(
-    A: np.ndarray,
-    H: np.ndarray,
-    F: np.ndarray,
-    Q: np.ndarray,
-    R: np.ndarray,
-    y_data: np.ndarray,
-    x_data: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    Ht = H.T
-    F1 = F
-    F2 = F @ F
-    F3 = F2 @ F
-    F4 = F3 @ F
-
-    x_stack = np.vstack([Ht, Ht @ F1, Ht @ F2, Ht @ F3, Ht @ F4])
-    om = np.zeros((10, 10))
-
-    om[np.ix_(range(4, 6), range(2, 4))] = Ht @ F1 @ Q @ H
-    om[np.ix_(range(6, 8), range(2, 4))] = Ht @ F2 @ Q @ H
-    om[np.ix_(range(8, 10), range(2, 4))] = Ht @ F3 @ Q @ H
-    om[np.ix_(range(6, 8), range(4, 6))] = Ht @ (F2 @ Q @ F1.T + F1 @ Q) @ H
-    om[np.ix_(range(8, 10), range(4, 6))] = Ht @ F1 @ (F2 @ Q @ F1.T + F1 @ Q) @ H
-    om[np.ix_(range(8, 10), range(6, 8))] = Ht @ F1 @ (F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q) @ H
-
-    om = om + om.T
-    om[np.ix_(range(0, 2), range(0, 2))] = R
-    om[np.ix_(range(2, 4), range(2, 4))] = Ht @ Q @ H + R
-    om[np.ix_(range(4, 6), range(4, 6))] = Ht @ (F1 @ Q @ F1.T + Q) @ H + R
-    om[np.ix_(range(6, 8), range(6, 8))] = Ht @ (F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q) @ H + R
-    om[np.ix_(range(8, 10), range(8, 10))] = Ht @ (
-        F3 @ Q @ (F1.T @ F1.T @ F1.T) + F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q
-    ) @ H + R
-
-    p1 = x_stack.T @ np.linalg.solve(om, x_stack)
-    yy = np.concatenate([y_data[i] for i in range(5)])
-    tmp = np.concatenate([A.T @ x_data[i] for i in range(5)])
-
-    diff = yy - tmp
-    xi0 = np.linalg.solve(p1, x_stack.T @ np.linalg.solve(om, diff))
-    resid = diff - x_stack @ xi0
-    scale = np.sum(resid**2) / (len(yy) - F.shape[0])
-    P0 = np.linalg.solve(p1, np.eye(F.shape[0]) * scale)
-    return xi0, P0
+    H[1, 0] = -parameters[p["a_1"]]
+    H[2, 0] = -parameters[p["a_2"]]
+    H[1, 1] = -parameters[p["b_3"]]
+    
+    # R matrix
+    R = np.diag([parameters[p["sigma_1"]] ** 2, parameters[p["sigma_2"]] ** 2])
+    
+    # Q matrix
+    Q = np.zeros((n_state, n_state))
+    Q[0, 0] = parameters[p["sigma_4"]] ** 2
+    
+    # F matrix
+    F = np.zeros((n_state, n_state))
+    F[0, 0] = 1.0
+    F[1, 0] = 1.0
+    F[2, 1] = 1.0
+    
+    # cons vector (drift)
+    cons = np.zeros(n_state)
+    cons[0] = parameters[p["g"]]  # trend growth
+    
+    kappa_vec = build_kappa_vector(T, parameters, use_kappa, kappa_inputs or [], n_base_params=12)
+    
+    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons, kappa_vec=kappa_vec)
 
 
 def build_stage2_system(
-    theta: np.ndarray,
+    parameters: np.ndarray,
     y_data: np.ndarray,
     x_data: np.ndarray,
     lambda_g: float,
-    xi0: Optional[np.ndarray] = None,
-    P0: Optional[np.ndarray] = None,
+    xi0: np.ndarray,
+    P0: np.ndarray,
+    use_kappa: bool = True,
+    kappa_inputs: Optional[list] = None,
 ) -> StateSpace:
-    A = np.zeros((2, 10))
-    A[0, 0:2] = theta[0:2]
-    A[0, 2:4] = theta[2] / 2.0
-    A[0, 9] = theta[3]
-    A[1, 0] = theta[7]
-    A[1, 4:6] = theta[5:7]
-    A[1, 6] = 1.0 - theta[5] - theta[6]
-    A[1, 7:9] = theta[8:10]
-    A = A.T
-
-    H = np.zeros((2, 4))
+    """
+    Build stage 2 state-space system matrices.
+    Stage 2 has 6 state variables: [y*, y*_{t-1}, y*_{t-2}, g, g_{t-1}, g_{t-2}]
+    x_data has 13 columns.
+    """
+    n_state = 6
+    T = y_data.shape[0]
+    p = PARAM_NUM_STAGE2
+    
+    # A matrix: 13 x 2, will be transposed
+    A = np.zeros((2, 13))
+    A[0, 0] = parameters[p["a_1"]]  # a_y,1
+    A[0, 1] = parameters[p["a_2"]]  # a_y,2
+    A[0, 2:4] = parameters[p["a_3"]] / 2.0  # a_r/2
+    A[0, 9] = parameters[p["a_4"]]  # a_0
+    A[1, 0] = parameters[p["b_3"]]  # b_y
+    A[1, 4] = parameters[p["b_1"]]  # b_{pi,1}
+    A[1, 5] = parameters[p["b_2"]]  # b_{pi,2-4}
+    A[1, 6] = 1.0 - parameters[p["b_1"]] - parameters[p["b_2"]]
+    A[1, 7] = parameters[p["b_4"]]  # b_oil
+    A[1, 8] = parameters[p["b_5"]]  # b_import
+    A[0, 10] = parameters[p["phi"]]  # phi
+    A[0, 11] = -parameters[p["a_1"]] * parameters[p["phi"]]  # -a_1*phi
+    A[0, 12] = -parameters[p["a_2"]] * parameters[p["phi"]]  # -a_2*phi
+    A[1, 11] = -parameters[p["b_3"]] * parameters[p["phi"]]  # -b_3*phi
+    A = A.T  # 13 x 2
+    
+    # H matrix: 6 x 2, will be transposed
+    H = np.zeros((2, n_state))
     H[0, 0] = 1.0
-    H[0, 1:3] = -theta[0:2]
-    H[0, 3] = theta[4]
-    H[1, 1] = -theta[7]
-    H = H.T
-
-    R = np.diag([theta[10] ** 2, theta[11] ** 2])
-
-    Q = np.zeros((4, 4))
-    Q[0, 0] = theta[12] ** 2
-    Q[3, 3] = (lambda_g * theta[12]) ** 2
-
-    F = np.zeros((4, 4))
-    F[0, 0] = F[0, 3] = F[1, 0] = F[2, 1] = F[3, 3] = 1.0
-    cons = np.zeros(4)
-
-    if xi0 is None or P0 is None:
-        xi0, P0 = _initialize_stage2(A, H, F, Q, R, y_data, x_data)
-
-    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons)
-
-
-def _initialize_stage3(
-    A: np.ndarray,
-    H: np.ndarray,
-    F: np.ndarray,
-    Q: np.ndarray,
-    R: np.ndarray,
-    y_data: np.ndarray,
-    x_data: np.ndarray,
-    xi0_gpot: np.ndarray,
-    P0_gpot: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, bool]:
-    Ht = H.T
-    F1 = F
-    F2 = F @ F
-    F3 = F2 @ F
-    F4 = F3 @ F
-
-    x_stack = np.vstack([Ht, Ht @ F1, Ht @ F2, Ht @ F3, Ht @ F4])
-    om = np.zeros((10, 10))
-
-    om[np.ix_(range(4, 6), range(2, 4))] = Ht @ F1 @ Q @ H
-    om[np.ix_(range(6, 8), range(2, 4))] = Ht @ F2 @ Q @ H
-    om[np.ix_(range(8, 10), range(2, 4))] = Ht @ F3 @ Q @ H
-    om[np.ix_(range(6, 8), range(4, 6))] = Ht @ F1 @ (F1 @ Q @ F1.T + Q) @ H
-    om[np.ix_(range(8, 10), range(4, 6))] = Ht @ F2 @ (F1 @ Q @ F1.T + Q) @ H
-    om[np.ix_(range(8, 10), range(6, 8))] = Ht @ F1 @ (F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q) @ H
-
-    om = om + om.T
-    om[np.ix_(range(0, 2), range(0, 2))] = R
-    om[np.ix_(range(2, 4), range(2, 4))] = Ht @ Q @ H + R
-    om[np.ix_(range(4, 6), range(4, 6))] = Ht @ (F1 @ Q @ F1.T + Q) @ H + R
-    om[np.ix_(range(6, 8), range(6, 8))] = Ht @ (F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q) @ H + R
-    om[np.ix_(range(8, 10), range(8, 10))] = Ht @ (
-        F3 @ Q @ (F1.T @ F1.T @ F1.T) + F2 @ Q @ (F1.T @ F1.T) + F1 @ Q @ F1.T + Q
-    ) @ H + R
-
-    det_om = np.linalg.det(om)
-    p1 = x_stack.T @ np.linalg.solve(om, x_stack) if det_om > 1e-16 else None
-    if det_om <= 1e-16 or np.linalg.det(p1) <= 1e-16:
-        return xi0_gpot, P0_gpot, False
-
-    yy = np.concatenate([y_data[i] for i in range(5)])
-    tmp = np.concatenate([A.T @ x_data[i] for i in range(5)])
-    diff = yy - tmp
-    xi0 = np.linalg.solve(p1, x_stack.T @ np.linalg.solve(om, diff))
-    resid = diff - x_stack @ xi0
-    scale = np.sum(resid**2) / (len(yy) - F.shape[0])
-    P0 = np.linalg.solve(p1, np.eye(F.shape[0]) * scale)
-    return xi0, P0, True
+    H[0, 1] = -parameters[p["a_1"]]
+    H[0, 2] = -parameters[p["a_2"]]
+    H[0, 4:6] = parameters[p["a_5"]] / 2.0  # a_g/2 for (g_{t-1} + g_{t-2})
+    H[1, 1] = -parameters[p["b_3"]]
+    H = H.T  # 6 x 2
+    
+    # R matrix
+    R = np.diag([parameters[p["sigma_1"]] ** 2, parameters[p["sigma_2"]] ** 2])
+    
+    # Q matrix
+    Q = np.zeros((n_state, n_state))
+    Q[0, 0] = parameters[p["sigma_4"]] ** 2
+    Q[3, 3] = (lambda_g * parameters[p["sigma_4"]]) ** 2
+    
+    # F matrix
+    F = np.zeros((n_state, n_state))
+    F[0, 0] = F[0, 3] = F[1, 0] = F[2, 1] = F[3, 3] = F[4, 3] = F[5, 4] = 1.0
+    
+    cons = np.zeros(n_state)
+    kappa_vec = build_kappa_vector(T, parameters, use_kappa, kappa_inputs or [], n_base_params=14)
+    
+    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons, kappa_vec=kappa_vec)
 
 
 def build_stage3_system(
-    theta: np.ndarray,
+    parameters: np.ndarray,
     y_data: np.ndarray,
     x_data: np.ndarray,
     lambda_g: float,
     lambda_z: float,
-    xi0: Optional[np.ndarray] = None,
-    P0: Optional[np.ndarray] = None,
-    xi0_gpot: Optional[np.ndarray] = None,
-    P0_gpot: Optional[np.ndarray] = None,
-) -> tuple[StateSpace, bool]:
-    if xi0_gpot is None or P0_gpot is None:
-        raise ValueError("xi0_gpot and P0_gpot must be provided for stage 3.")
-
-    A = np.zeros((2, 9))
-    A[0, 0:2] = theta[0:2]
-    A[0, 2:4] = theta[2] / 2.0
-    A[1, 0] = theta[5]
-    A[1, 4:6] = theta[3:5]
-    A[1, 6] = 1.0 - theta[3] - theta[4]
-    A[1, 7:9] = theta[6:8]
-    A = A.T
-
-    H = np.zeros((2, 7))
-    H[0, 0] = 1.0
-    H[0, 1:3] = -theta[0:2]
-    H[0, 3:5] = -theta[8] * theta[2] * 2.0
-    H[0, 5:7] = -theta[2] / 2.0
-    H[1, 1] = -theta[5]
-    H = H.T
-
-    R = np.diag([theta[9] ** 2, theta[10] ** 2])
-
-    Q = np.zeros((7, 7))
-    Q[0, 0] = (1 + lambda_g**2) * theta[11] ** 2
-    Q[0, 3] = Q[3, 0] = (lambda_g * theta[11]) ** 2
-    Q[3, 3] = (lambda_g * theta[11]) ** 2
-    Q[5, 5] = (lambda_z * theta[9] / theta[2]) ** 2
-
-    F = np.zeros((7, 7))
-    F[0, 0] = F[0, 3] = F[1, 0] = F[2, 1] = F[3, 3] = F[4, 3] = F[5, 5] = F[6, 5] = 1.0
-    cons = np.zeros(7)
-
-    gls = False
-    if xi0 is None or P0 is None:
-        xi0, P0, gls = _initialize_stage3(
-            A, H, F, Q, R, y_data, x_data, xi0_gpot, P0_gpot
-        )
-
-    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons), gls
-
-
-def calculate_covariance(
-    initial_theta: np.ndarray,
-    bounds: list[tuple[float, float]],
-    y_data: np.ndarray,
-    x_data: np.ndarray,
-    stage: int,
-    lambda_g: Optional[float] = None,
-    lambda_z: Optional[float] = None,
-    xi0: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """
-    Python port of calculate.covariance.R.
-
-    Parameters
-    ----------
-    initial_theta : np.ndarray
-        Starting values for the parameters.
-    bounds : list of tuple
-        Bounds passed to scipy.optimize.minimize.
-    stage : int
-        1, 2, or 3.
-    xi0 : np.ndarray
-        Initial state vector used during the covariance search (stage 3).
-    """
-
-    if xi0 is None:
-        raise ValueError("xi0 must be provided for calculate_covariance.")
-
-    n_state = xi0.size
-    P0 = np.eye(n_state) * 0.2
-
-    def objective(theta: np.ndarray) -> float:
-        ss = _build_state_space_for_stage(stage, theta, y_data, x_data, lambda_g, lambda_z, xi0, P0)
-        from .kalman import kalman_filter
-
-        filtered = kalman_filter(
-            ss.xi0, ss.P0, ss.F, ss.Q, ss.A, ss.H, ss.R, ss.cons, y_data, x_data
-        )
-        return -filtered.loglik
-
-    res = minimize(objective, initial_theta, method="L-BFGS-B", bounds=bounds, options={"maxiter": 200})
-    if not res.success:
-        raise RuntimeError(f"Covariance optimization failed: {res.message}")
-
-    ss = _build_state_space_for_stage(stage, res.x, y_data, x_data, lambda_g, lambda_z, xi0, P0)
-    from .kalman import kalman_filter
-
-    filtered = kalman_filter(
-        ss.xi0, ss.P0, ss.F, ss.Q, ss.A, ss.H, ss.R, ss.cons, y_data, x_data
-    )
-    return filtered.cov_pred[0]
-
-
-def _build_state_space_for_stage(
-    stage: int,
-    theta: np.ndarray,
-    y_data: np.ndarray,
-    x_data: np.ndarray,
-    lambda_g: Optional[float],
-    lambda_z: Optional[float],
     xi0: np.ndarray,
     P0: np.ndarray,
+    use_kappa: bool = True,
+    kappa_inputs: Optional[list] = None,
 ) -> StateSpace:
-    if stage == 1:
-        return build_stage1_system(theta, y_data, x_data, xi0=xi0, P0=P0)
-    if stage == 2:
-        if lambda_g is None:
-            raise ValueError("lambda_g is required for stage 2.")
-        return build_stage2_system(theta, y_data, x_data, lambda_g, xi0=xi0, P0=P0)
+    """
+    Build stage 3 state-space system matrices.
+    Stage 3 has 9 state variables: [y*, y*_{t-1}, y*_{t-2}, g, g_{t-1}, g_{t-2}, z, z_{t-1}, z_{t-2}]
+    x_data has 12 columns.
+    """
+    n_state = 9
+    T = y_data.shape[0]
+    p = PARAM_NUM_STAGE3
+    
+    # A matrix: 12 x 2, will be transposed
+    A = np.zeros((2, 12))
+    A[0, 0] = parameters[p["a_1"]]  # a_y,1
+    A[0, 1] = parameters[p["a_2"]]  # a_y,2
+    A[0, 2:4] = parameters[p["a_3"]] / 2.0  # a_r/2
+    A[1, 0] = parameters[p["b_3"]]  # b_y
+    A[1, 4] = parameters[p["b_1"]]  # b_{pi,1}
+    A[1, 5] = parameters[p["b_2"]]  # b_{pi,2-4}
+    A[1, 6] = 1.0 - parameters[p["b_1"]] - parameters[p["b_2"]]
+    A[1, 7] = parameters[p["b_4"]]  # b_oil
+    A[1, 8] = parameters[p["b_5"]]  # b_import
+    A[0, 9] = parameters[p["phi"]]  # phi
+    A[0, 10] = -parameters[p["a_1"]] * parameters[p["phi"]]  # -a_y,1*phi
+    A[0, 11] = -parameters[p["a_2"]] * parameters[p["phi"]]  # -a_y,2*phi
+    A[1, 10] = -parameters[p["b_3"]] * parameters[p["phi"]]  # -b_y*phi
+    A = A.T  # 12 x 2
+    
+    # H matrix: 9 x 2, will be transposed
+    H = np.zeros((2, n_state))
+    H[0, 0] = 1.0
+    H[0, 1] = -parameters[p["a_1"]]
+    H[0, 2] = -parameters[p["a_2"]]
+    H[0, 4:6] = -parameters[p["c"]] * parameters[p["a_3"]] * 2.0  # c * a_r annualized
+    H[0, 7:9] = -parameters[p["a_3"]] / 2.0  # a_r/2 for z lags
+    H[1, 1] = -parameters[p["b_3"]]
+    H = H.T  # 9 x 2
+    
+    # R matrix
+    R = np.diag([parameters[p["sigma_1"]] ** 2, parameters[p["sigma_2"]] ** 2])
+    
+    # Q matrix
+    Q = np.zeros((n_state, n_state))
+    Q[0, 0] = parameters[p["sigma_4"]] ** 2  # sigma_y*
+    Q[3, 3] = (lambda_g * parameters[p["sigma_4"]]) ** 2  # sigma_g
+    Q[6, 6] = (lambda_z * parameters[p["sigma_1"]] / parameters[p["a_3"]]) ** 2  # sigma_z
+    
+    # F matrix
+    F = np.zeros((n_state, n_state))
+    F[0, 0] = F[0, 3] = 1.0  # y* = y* + g
+    F[1, 0] = 1.0  # y*_{t-1} = y*
+    F[2, 1] = 1.0  # y*_{t-2} = y*_{t-1}
+    F[3, 3] = 1.0  # g = g (random walk)
+    F[4, 3] = 1.0  # g_{t-1} = g
+    F[5, 4] = 1.0  # g_{t-2} = g_{t-1}
+    F[6, 6] = 1.0  # z = z (random walk)
+    F[7, 6] = 1.0  # z_{t-1} = z
+    F[8, 7] = 1.0  # z_{t-2} = z_{t-1}
+    
+    cons = np.zeros(n_state)
+    kappa_vec = build_kappa_vector(T, parameters, use_kappa, kappa_inputs or [], n_base_params=13)
+    
+    return StateSpace(xi0=xi0, P0=P0, F=F, Q=Q, A=A, H=H, R=R, cons=cons, kappa_vec=kappa_vec)
+
+
+def calculate_initial_covariance(
+    initial_parameters: np.ndarray,
+    bounds: List[tuple],
+    y_data: np.ndarray,
+    x_data: np.ndarray,
+    stage: int,
+    lambda_g: float,
+    lambda_z: float,
+    xi0: np.ndarray,
+    use_kappa: bool = True,
+    kappa_inputs: Optional[list] = None,
+) -> np.ndarray:
+    """Calculate initial covariance matrix P0 via optimization."""
+    n_state = xi0.size
+    P0_init = np.eye(n_state) * 0.2
+    
+    from .kalman import kalman_filter
+    
+    def objective(theta: np.ndarray) -> float:
+        try:
+            if stage == 3:
+                ss = build_stage3_system(
+                    theta, y_data, x_data, lambda_g, lambda_z, xi0, P0_init,
+                    use_kappa, kappa_inputs
+                )
+            elif stage == 2:
+                ss = build_stage2_system(
+                    theta, y_data, x_data, lambda_g, xi0, P0_init,
+                    use_kappa, kappa_inputs
+                )
+            else:
+                ss = build_stage1_system(
+                    theta, y_data, x_data, xi0, P0_init,
+                    use_kappa, kappa_inputs
+                )
+            filtered = kalman_filter(
+                ss.xi0, ss.P0, ss.F, ss.Q, ss.A, ss.H, ss.R, ss.cons,
+                y_data, x_data, ss.kappa_vec
+            )
+            return -filtered.loglik
+        except (np.linalg.LinAlgError, ValueError):
+            return 1e10
+    
+    res = minimize(
+        objective, initial_parameters, method="L-BFGS-B",
+        bounds=bounds, options={"maxiter": 1000}
+    )
+    
+    # Get final covariance from filter
     if stage == 3:
-        if lambda_g is None or lambda_z is None:
-            raise ValueError("lambda_g and lambda_z are required for stage 3.")
-        state_space, _ = build_stage3_system(
-            theta,
-            y_data,
-            x_data,
-            lambda_g,
-            lambda_z,
-            xi0=xi0,
-            P0=P0,
-            xi0_gpot=xi0,
-            P0_gpot=P0,
+        ss = build_stage3_system(
+            res.x, y_data, x_data, lambda_g, lambda_z, xi0, P0_init,
+            use_kappa, kappa_inputs
         )
-        return state_space
-    raise ValueError(f"Unsupported stage: {stage}")
-
-
+    elif stage == 2:
+        ss = build_stage2_system(
+            res.x, y_data, x_data, lambda_g, xi0, P0_init,
+            use_kappa, kappa_inputs
+        )
+    else:
+        ss = build_stage1_system(
+            res.x, y_data, x_data, xi0, P0_init,
+            use_kappa, kappa_inputs
+        )
+    
+    filtered = kalman_filter(
+        ss.xi0, ss.P0, ss.F, ss.Q, ss.A, ss.H, ss.R, ss.cons,
+        y_data, x_data, ss.kappa_vec
+    )
+    return filtered.cov_pred[0]
