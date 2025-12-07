@@ -44,6 +44,7 @@ Download `Laubach_Williams_current_estimates.xlsx` from the [NY Fed website](htt
 - After updating the file, rerun the pipeline (e.g., `python scripts/run_lw_port.py`).
 - Handy codes (check vintage/definitions):
   - FRED: `GDPC1` (real GDP), `PCEPILFE` (core PCE price index), `FEDFUNDS` (federal funds), `RACIMUSDM` (refiners’ acquisition cost, imported crude oil).
+  - FRED (core PCE quarterly alternative): `BPCCRO1Q156NBEA` (PCE excluding food & energy, chain-type price index).
   - BEA NIPA tables: 1.1.6/1.1.3 (real GDP), 2.3.4/2.3.6 (PCE price indexes), 4.2.4/4.2.6 (import price indexes for petroleum vs. nonpetroleum).
   - For nonpetroleum import prices via FRED/BLS, use the “Import Price Index: All Imports Excluding Petroleum” series (ticker varies by vintage; available in FRED search).
 
