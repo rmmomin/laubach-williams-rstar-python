@@ -17,3 +17,5 @@ data/*.xlsx
 !outputs/data/**
 !outputs/figures/**
 
+outputs/data/.DS_Store
+outputs/figures/.DS_Store
