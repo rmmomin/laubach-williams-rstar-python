@@ -10,10 +10,10 @@ run.log
 # Input data (download from NY Fed)
 data/*.xlsx
 !data/.gitkeep
+# Keep supplemental CSV/XLSX added for diagnostics (e.g., PCEPILFE.csv, BPCCRO1Q156NBEA.csv, Inflation.xlsx)
+!data/*.csv
 
-# Output data and figures
-outputs/data/*
-!outputs/data/.gitkeep
-outputs/figures/*
-!outputs/figures/.gitkeep
+# Output data and figures (track artifacts from diagnostics)
+!outputs/data/**
+!outputs/figures/**
 
