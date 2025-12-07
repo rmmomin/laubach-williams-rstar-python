@@ -63,7 +63,7 @@ python scripts/run_lw_port.py
 python scripts/check_inflation_expectations.py
 ```
 
-Generates AR(3)/AR(4) vs spreadsheet expectations, SPF CPI 1Y/10Y comparisons, ARIMA search (p=1..6, q=0..1), and the optional 2021Q2–Q4 override plot. Outputs land in `outputs/data/` and `outputs/figures/`.
+Generates AR(3)/AR(4) vs spreadsheet expectations, a 4-quarter moving-average vs spreadsheet comparison (CSV + PNG), SPF CPI 1Y/10Y comparisons (if `data/Inflation.xlsx` is present), ARIMA search (p=1..6, q=0..1), and the optional 2021Q2–Q4 override plot (includes MA(4)). Outputs land in `outputs/data/` and `outputs/figures/`.
 
 ### Condensed Single-File Version
 

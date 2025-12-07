@@ -52,7 +52,10 @@ def core_pcepilfe_quarterly() -> pd.DataFrame:
 
 
 def spf_cpi() -> pd.DataFrame:
-    df = pd.read_excel(DATA_DIR / "Inflation.xlsx", sheet_name="INFLATION")
+    path = DATA_DIR / "Inflation.xlsx"
+    if not path.exists():
+        return pd.DataFrame(columns=["date", "INFCPI1YR", "INFCPI10YR"])
+    df = pd.read_excel(path, sheet_name="INFLATION")
     df["date"] = pd.PeriodIndex(year=df["YEAR"], quarter=df["QUARTER"], freq="Q").to_timestamp(how="start")
     return df[["date", "INFCPI1YR", "INFCPI10YR"]]
 
@@ -149,6 +152,19 @@ def main():
         core_q[["date", "inflation.pcepilfe"]], on="date", how="left"
     )
 
+    # 4-quarter simple moving average of quarterly inflation (q/q annualized) to mirror the sheet proxy
+    merged["exp.ma4"] = merged["inflation"].rolling(4).mean()
+    merged[["date", "inflation", "inflation.expectations", "exp.ma4"]].to_csv(
+        OUT_DATA / "inflation_expectations_ma4.csv", index=False
+    )
+    plot_series(
+        dates,
+        [model_exp, merged["exp.ma4"]],
+        ["Model exp (sheet)", "Inflation MA(4)"],
+        "Inflation expectations: sheet vs 4Q MA of inflation",
+        OUT_FIGS / "inflation_expectations_ma4.png",
+    )
+
     # AR(3) vs AR(4) on core PCEPILFE
     merged["exp.ar3.pcepilfe"] = ar_expectations(merged["inflation.pcepilfe"], order=3, window=40)
     merged["exp.ar4.pcepilfe"] = ar_expectations(merged["inflation.pcepilfe"], order=4, window=40)
@@ -226,19 +242,22 @@ def main():
         }
     ).to_csv(OUT_DATA / "inflation_expectations_arima101_override.csv", index=False)
 
+    exp_ma4_masked = merged.loc[mask, "exp.ma4"].to_numpy()
     plot_series(
         dates_masked,
-        [exp_model, arima101_fc, arima101_override, spf_cpi1y_masked],
-        ["Model exp (sheet)", "ARIMA(1,0,1)", "ARIMA(1,0,1) + override 2021Q2-4", "SPF CPI 1Y"],
-        "Inflation expectations: ARIMA(1,0,1) with pandemic override and SPF",
+        [exp_model, exp_ma4_masked, arima101_fc, arima101_override, spf_cpi1y_masked],
+        ["Model exp (sheet)", "Inflation MA(4)", "ARIMA(1,0,1)", "ARIMA(1,0,1) + override 2021Q2-4", "SPF CPI 1Y"],
+        "Inflation expectations: ARIMA(1,0,1) with pandemic override, MA(4), and SPF",
         OUT_FIGS / "inflation_expectations_arima101_override.png",
     )
 
     # Print summary to console
     rmse_ar3 = np.sqrt(np.nanmean((merged["exp.ar3.pcepilfe"] - model_exp) ** 2))
     rmse_ar4 = np.sqrt(np.nanmean((merged["exp.ar4.pcepilfe"] - model_exp) ** 2))
+    rmse_ma4 = np.sqrt(np.nanmean((merged["exp.ma4"] - model_exp) ** 2))
     rmse_best = np.sqrt(np.nanmean((best_fc - exp_model) ** 2))
     rmse_over = np.sqrt(np.nanmean((arima101_override - exp_model) ** 2))
+    print(f"MA(4) RMSE vs model: {rmse_ma4:.3f}")
     print(f"AR(3) RMSE vs model: {rmse_ar3:.3f}")
     print(f"AR(4) RMSE vs model: {rmse_ar4:.3f}")
     print(f"Best ARIMA{best_order} RMSE vs model: {rmse_best:.3f}")
