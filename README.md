@@ -57,6 +57,14 @@ Download `Laubach_Williams_current_estimates.xlsx` from the [NY Fed website](htt
 python scripts/run_lw_port.py
 ```
 
+#### Inflation expectation diagnostics
+
+```bash
+python scripts/check_inflation_expectations.py
+```
+
+Generates AR(3)/AR(4) vs spreadsheet expectations, SPF CPI 1Y/10Y comparisons, ARIMA search (p=1..6, q=0..1), and the optional 2021Q2–Q4 override plot. Outputs land in `outputs/data/` and `outputs/figures/`.
+
 ### Condensed Single-File Version
 
 For a standalone single-file version, use the `condensed/` directory:
