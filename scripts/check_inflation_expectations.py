@@ -199,7 +199,7 @@ def main():
         OUT_FIGS / "inflation_expectations_best_arima.png",
     )
 
-    # ARIMA(1,0,1) with pandemic overrides for 2021Q2–Q4
+    # ARIMA(1,0,1) with pandemic overrides for 2021Q2–Q4 (plot with SPF CPI 1Y)
     arima101_fc = forecasts_store.get((1, 0, 1))
     if arima101_fc is None:
         arima101_fc = np.full(len(infl), np.nan)
@@ -214,20 +214,23 @@ def main():
         if len(idx) == 1:
             arima101_override[idx[0]] = val
 
+    spf_cpi1y_masked = merged_spf.loc[mask, "INFCPI1YR"].to_numpy() if "mask" in locals() else np.full(len(infl), np.nan)
+
     pd.DataFrame(
         {
             "date": dates_masked,
             "exp.model": exp_model,
             "exp.arima101": arima101_fc,
             "exp.arima101.override": arima101_override,
+            "spf.cpi1y": spf_cpi1y_masked,
         }
     ).to_csv(OUT_DATA / "inflation_expectations_arima101_override.csv", index=False)
 
     plot_series(
         dates_masked,
-        [exp_model, arima101_fc, arima101_override],
-        ["Model exp (sheet)", "ARIMA(1,0,1)", "ARIMA(1,0,1) + override 2021Q2-4"],
-        "Inflation expectations: ARIMA(1,0,1) with pandemic override",
+        [exp_model, arima101_fc, arima101_override, spf_cpi1y_masked],
+        ["Model exp (sheet)", "ARIMA(1,0,1)", "ARIMA(1,0,1) + override 2021Q2-4", "SPF CPI 1Y"],
+        "Inflation expectations: ARIMA(1,0,1) with pandemic override and SPF",
         OUT_FIGS / "inflation_expectations_arima101_override.png",
     )
 
