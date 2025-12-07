@@ -12,7 +12,7 @@ The port replicates the three-stage estimation procedure:
 All estimates match the published NY Fed figures within **0.04 percentage points**:
 
 | Metric (Smoothed) | Max Abs Diff | RMSE |
-|-------------------|--------------|------|
+|:------------------|-------------:|-----:|
 | r* | 0.022 pp | 0.012 |
 | g (trend growth) | 0.008 pp | 0.003 |
 | z (other factors) | 0.011 pp | 0.009 |
@@ -20,25 +20,53 @@ All estimates match the published NY Fed figures within **0.04 percentage points
 
 ## Setup
 
-\`\`\`bash
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-\`\`\`
+```
 
 ## Data
 
-Download \`Laubach_Williams_current_estimates.xlsx\` from the [NY Fed website](https://www.newyorkfed.org/research/policy/rstar) and place it in \`data/\`.
+Download `Laubach_Williams_current_estimates.xlsx` from the [NY Fed website](https://www.newyorkfed.org/research/policy/rstar) and place it in `data/`.
+
+### Updating Data (core inputs + relative price controls)
+- Edit `data/Laubach_Williams_current_estimates.xlsx` (or your CSV equivalent) to append new quarters.
+- Refresh core inputs:
+  - Real GDP level (log): BEA NIPA real GDP (e.g., Table 1.1.6/1.1.3).
+  - Core PCE price index: compute q/q annualized core PCE inflation (BEA Table 2.3.4/2.3.6).
+  - Federal funds rate: H.15 monthly, averaged to quarterly.
+  - Expected inflation: recompute 4-quarter-ahead expectation via AR(3) on core PCE over the extended sample (matches the spreadsheet logic).
+  - COVID dummy (`covid.ind`) and any kappa windows if you keep `use_kappa=True` (2020–2022 in the NY Fed setup; extend if you define new high-volatility periods).
+- Refresh relative price controls used in the Phillips curve:
+  - Crude oil import price inflation: q/q annualized log change of a petroleum import price series (BEA petroleum import price deflator or EIA refiner acquisition cost for imported crude).
+  - Core import price inflation (nonpetroleum): q/q annualized log change of the import price deflator excluding petroleum (BEA) or BLS nonpetroleum import price index.
+- After updating the file, rerun the pipeline (e.g., `python scripts/run_lw_port.py`).
+- Handy codes (check vintage/definitions):
+  - FRED: `GDPC1` (real GDP), `PCEPILFE` (core PCE price index), `FEDFUNDS` (federal funds), `RACIMUSDM` (refiners’ acquisition cost, imported crude oil).
+  - BEA NIPA tables: 1.1.6/1.1.3 (real GDP), 2.3.4/2.3.6 (PCE price indexes), 4.2.4/4.2.6 (import price indexes for petroleum vs. nonpetroleum).
+  - For nonpetroleum import prices via FRED/BLS, use the “Import Price Index: All Imports Excluding Petroleum” series (ticker varies by vintage; available in FRED search).
 
 ## Usage
 
-\`\`\`bash
+### Modular Version (Recommended)
+
+```bash
 python scripts/run_lw_port.py
-\`\`\`
+```
 
-Or programmatically:
+### Condensed Single-File Version
 
-\`\`\`python
+For a standalone single-file version, use the `condensed/` directory:
+
+```bash
+cd condensed
+python lw_estimation.py ../data/Laubach_Williams_current_estimates.xlsx
+```
+
+### Programmatic Usage
+
+```python
 from lwrep.run import run_estimation
 
 metrics = run_estimation(
@@ -48,33 +76,35 @@ metrics = run_estimation(
     sample_end=(2025, 2),
     use_kappa=True,  # COVID time-varying variance
 )
-\`\`\`
+```
 
 ## Project Structure
 
-\`\`\`
-├── data/                    # Input data (Excel from NY Fed)
+```
+├── data/                   # Input data (Excel from NY Fed)
+├── condensed/              # Single-file standalone version
+│   └── lw_estimation.py    # All code in one file
 ├── outputs/
-│   ├── data/                # CSV results
-│   └── figures/             # Comparison plots
+│   ├── data/               # CSV results
+│   └── figures/            # Comparison plots
 ├── scripts/
-│   └── run_lw_port.py       # Main entry point
+│   └── run_lw_port.py      # Main entry point
 ├── src/lwrep/
 │   ├── __init__.py
-│   ├── kalman.py            # Kalman filter/smoother
-│   ├── median_unbiased.py   # λ_g, λ_z estimation
-│   ├── parameters.py        # State-space matrices
-│   ├── run.py               # Orchestration & plotting
-│   └── stages.py            # Stage 1, 2, 3 estimation
+│   ├── kalman.py           # Kalman filter/smoother
+│   ├── median_unbiased.py  # λ_g, λ_z estimation
+│   ├── parameters.py       # State-space matrices
+│   ├── run.py              # Orchestration & plotting
+│   └── stages.py           # Stage 1, 2, 3 estimation
 └── requirements.txt
-\`\`\`
+```
 
 ## Output
 
 Running the script produces:
-- \`outputs/data/lw_port_results.csv\` - Filtered and smoothed estimates
-- \`outputs/figures/lw_comparison.png\` - Time series comparison
-- \`outputs/figures/lw_differences.png\` - Difference plots
+- `outputs/data/lw_port_results.csv` - Filtered and smoothed estimates
+- `outputs/figures/lw_comparison.png` - Time series comparison
+- `outputs/figures/lw_differences.png` - Difference plots
 
 ## References
 

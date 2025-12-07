@@ -173,9 +173,11 @@ def kalman_states_smoothed(filtered: FilteredStates, F: np.ndarray) -> SmoothedS
         P_tt = filtered.P_tt[t * n_state:(t + 1) * n_state, :]
         P_tp1t = filtered.P_ttm1[(t + 1) * n_state:(t + 2) * n_state, :]
         
+        # Use solve instead of inv for numerical stability
         try:
             J_t = P_tt @ F.T @ np.linalg.solve(P_tp1t, np.eye(n_state))
         except np.linalg.LinAlgError:
+            # Add small regularization if singular
             J_t = P_tt @ F.T @ np.linalg.solve(P_tp1t + 1e-10 * np.eye(n_state), np.eye(n_state))
         
         xi_tt = filtered.xi_tt[t]

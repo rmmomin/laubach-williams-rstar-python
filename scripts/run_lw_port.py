@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from lwrep.run import run_estimation
 
-
 def main():
     project_root = Path(__file__).parent.parent
     excel_path = project_root / "data" / "Laubach_Williams_current_estimates.xlsx"
