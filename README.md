@@ -35,6 +35,7 @@ Download `Laubach_Williams_current_estimates.xlsx` from the [NY Fed website](htt
 - Refresh core inputs:
   - Real GDP level (log): BEA NIPA real GDP (e.g., Table 1.1.6/1.1.3).
   - Core PCE price index: compute q/q annualized core PCE inflation (BEA Table 2.3.4/2.3.6).
+    - The spreadsheet’s `inflation` column aligns with quarterly core PCE built from monthly `PCEPILFE` (average within quarter, 400·Δlog). `BPCCRO1Q156NBEA` is a close quarterly alternative but does not match as tightly.
   - Federal funds rate: H.15 monthly, averaged to quarterly.
   - Expected inflation: recompute 4-quarter-ahead expectation via AR(3) on core PCE over the extended sample (matches the spreadsheet logic).
   - COVID dummy (`covid.ind`) and any kappa windows if you keep `use_kappa=True` (2020–2022 in the NY Fed setup; extend if you define new high-volatility periods).
