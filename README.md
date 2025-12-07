@@ -37,7 +37,7 @@ Download `Laubach_Williams_current_estimates.xlsx` from the [NY Fed website](htt
   - Core PCE price index: compute q/q annualized core PCE inflation (BEA Table 2.3.4/2.3.6).
     - The spreadsheet’s `inflation` column aligns with quarterly core PCE built from monthly `PCEPILFE` (average within quarter, 400·Δlog). `BPCCRO1Q156NBEA` is a close quarterly alternative but does not match as tightly.
   - Federal funds rate: H.15 monthly, averaged to quarterly.
-  - Expected inflation: recompute 4-quarter-ahead expectation via AR(3) on core PCE over the extended sample (matches the spreadsheet logic). In checks, AR(4) on core PCEPILFE inflation fit the existing expectations best (RMSE ≈ 0.77 pp) versus SPF CPI 1Y (≈0.82) and SPF CPI 10Y (≈0.95).
+  - Expected inflation: recompute 4-quarter-ahead expectation via AR(3) on core PCE over the extended sample (matches the spreadsheet logic). In checks, AR(4) on core PCEPILFE inflation fit the existing expectations best (RMSE ≈ 0.77 pp) versus SPF CPI 1Y (≈0.82) and SPF CPI 10Y (≈0.95). A 40-quarter rolling ARIMA(1,0,1) is similar unless you override the pandemic dips; overriding the 2021Q2–Q4 expectations to spreadsheet values improved RMSE to ~0.57 pp.
   - COVID dummy (`covid.ind`) and any kappa windows if you keep `use_kappa=True` (2020–2022 in the NY Fed setup; extend if you define new high-volatility periods).
 - Refresh relative price controls used in the Phillips curve:
   - Crude oil import price inflation: q/q annualized log change of a petroleum import price series (BEA petroleum import price deflator or EIA refiner acquisition cost for imported crude).
