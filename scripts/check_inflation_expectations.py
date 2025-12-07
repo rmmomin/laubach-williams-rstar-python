@@ -48,6 +48,8 @@ def core_pcepilfe_quarterly() -> pd.DataFrame:
     q["date"] = q["q"].dt.to_timestamp(how="start")
     q = q[["date", "pcepilfe"]].sort_values("date")
     q["inflation.pcepilfe"] = 400 * np.log(q["pcepilfe"]).diff()
+    # Year-over-year quarterly inflation (not annualized) for 4Q moving average
+    q["inflation.pcepilfe.yoy"] = 100 * np.log(q["pcepilfe"]).diff(4)
     return q
 
 
@@ -125,6 +127,26 @@ def arima_search(
     return res_df, forecasts_store
 
 
+def rolling_arima_forecast(series: pd.Series, order: Tuple[int, int, int], window: int = 40, horizon: int = 4) -> pd.Series:
+    """Rolling ARIMA forecast; mean of horizon steps."""
+    y = series.to_numpy(dtype=float)
+    n = len(y)
+    res = np.full(n, np.nan)
+    for t in range(n):
+        if t < max(window, order[0] + order[1] + order[2] + 1):
+            continue
+        sample = y[t - window : t]
+        if np.isnan(sample).any():
+            continue
+        try:
+            fit = ARIMA(sample, order=order).fit()
+            f = fit.forecast(steps=horizon)
+            res[t] = float(f.mean())
+        except Exception:
+            continue
+    return pd.Series(res, index=series.index)
+
+
 def plot_series(dates, series_list, labels, title, path):
     plt.figure(figsize=(10, 5))
     for s, lbl in zip(series_list, labels):
@@ -149,20 +171,48 @@ def main():
 
     core_q = core_pcepilfe_quarterly()
     merged = input_df[["date", "inflation.expectations", "inflation"]].merge(
-        core_q[["date", "inflation.pcepilfe"]], on="date", how="left"
+        core_q[["date", "inflation.pcepilfe", "inflation.pcepilfe.yoy"]], on="date", how="left"
     )
 
     # 4-quarter simple moving average of quarterly inflation (q/q annualized) to mirror the sheet proxy
     merged["exp.ma4"] = merged["inflation"].rolling(4).mean()
-    merged[["date", "inflation", "inflation.expectations", "exp.ma4"]].to_csv(
-        OUT_DATA / "inflation_expectations_ma4.csv", index=False
+
+    # 4-quarter moving average of year-over-year inflation (distinct from MA(4) above)
+    merged["exp.ma4.yoy"] = merged["inflation.pcepilfe.yoy"].rolling(4).mean()
+    merged["exp.ma4.yoy"] = merged["exp.ma4.yoy"].fillna(merged["inflation.expectations"])
+
+    # Rolling MA(4) model (Box-Jenkins) on quarterly inflation (p=0, d=0, q=4)
+    merged["exp.ma4.model"] = rolling_arima_forecast(merged["inflation.pcepilfe"], order=(0, 0, 4), window=40, horizon=4)
+
+    merged[
+        [
+            "date",
+            "inflation",
+            "inflation.pcepilfe.yoy",
+            "inflation.expectations",
+            "exp.ma4",
+            "exp.ma4.yoy",
+            "exp.ma4.model",
+        ]
+    ].to_csv(OUT_DATA / "inflation_expectations_ma4.csv", index=False)
+    plot_series(
+        dates,
+        [model_exp, merged["exp.ma4"], merged["exp.ma4.yoy"]],
+        [
+            "Model exp (sheet)",
+            "4Q moving avg of q/q annualized inflation (current + 3 lags)",
+            "4Q moving avg of YoY inflation",
+        ],
+        "Inflation expectations: sheet vs 4Q moving averages",
+        OUT_FIGS / "inflation_expectations_ma4.png",
     )
+    # Simpler view: just sheet vs q/q 4Q moving average
     plot_series(
         dates,
         [model_exp, merged["exp.ma4"]],
-        ["Model exp (sheet)", "Inflation MA(4)"],
-        "Inflation expectations: sheet vs 4Q MA of inflation",
-        OUT_FIGS / "inflation_expectations_ma4.png",
+        ["Model exp (sheet)", "4Q moving avg of q/q annualized inflation (current + 3 lags)"],
+        "Inflation expectations: sheet vs 4Q moving average (q/q annualized)",
+        OUT_FIGS / "inflation_expectations_ma4_qoq_only.png",
     )
 
     # AR(3) vs AR(4) on core PCEPILFE
@@ -245,9 +295,16 @@ def main():
     exp_ma4_masked = merged.loc[mask, "exp.ma4"].to_numpy()
     plot_series(
         dates_masked,
-        [exp_model, exp_ma4_masked, arima101_fc, arima101_override, spf_cpi1y_masked],
-        ["Model exp (sheet)", "Inflation MA(4)", "ARIMA(1,0,1)", "ARIMA(1,0,1) + override 2021Q2-4", "SPF CPI 1Y"],
-        "Inflation expectations: ARIMA(1,0,1) with pandemic override, MA(4), and SPF",
+        [exp_model, exp_ma4_masked, merged.loc[mask, "exp.ma4.model"].to_numpy(), arima101_fc, arima101_override, spf_cpi1y_masked],
+        [
+            "Model exp (sheet)",
+            "4Q moving avg of q/q annualized inflation",
+            "MA(4) model forecast (rolling ARIMA 0,0,4)",
+            "ARIMA(1,0,1)",
+            "ARIMA(1,0,1) + override 2021Q2-4",
+            "SPF CPI 1Y",
+        ],
+        "Inflation expectations: sheet vs MA filters/models and ARIMA/SPF",
         OUT_FIGS / "inflation_expectations_arima101_override.png",
     )
 
@@ -255,9 +312,13 @@ def main():
     rmse_ar3 = np.sqrt(np.nanmean((merged["exp.ar3.pcepilfe"] - model_exp) ** 2))
     rmse_ar4 = np.sqrt(np.nanmean((merged["exp.ar4.pcepilfe"] - model_exp) ** 2))
     rmse_ma4 = np.sqrt(np.nanmean((merged["exp.ma4"] - model_exp) ** 2))
+    rmse_ma4_yoy = np.sqrt(np.nanmean((merged["exp.ma4.yoy"] - model_exp) ** 2))
+    rmse_ma4_model = np.sqrt(np.nanmean((merged["exp.ma4.model"] - model_exp) ** 2))
     rmse_best = np.sqrt(np.nanmean((best_fc - exp_model) ** 2))
     rmse_over = np.sqrt(np.nanmean((arima101_override - exp_model) ** 2))
     print(f"MA(4) RMSE vs model: {rmse_ma4:.3f}")
+    print(f"4Q MA YoY RMSE vs model: {rmse_ma4_yoy:.3f}")
+    print(f"MA(4) model RMSE vs model: {rmse_ma4_model:.3f}")
     print(f"AR(3) RMSE vs model: {rmse_ar3:.3f}")
     print(f"AR(4) RMSE vs model: {rmse_ar4:.3f}")
     print(f"Best ARIMA{best_order} RMSE vs model: {rmse_best:.3f}")

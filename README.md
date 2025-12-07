@@ -63,7 +63,21 @@ python scripts/run_lw_port.py
 python scripts/check_inflation_expectations.py
 ```
 
-Generates AR(3)/AR(4) vs spreadsheet expectations, a 4-quarter moving-average vs spreadsheet comparison (CSV + PNG), SPF CPI 1Y/10Y comparisons (if `data/Inflation.xlsx` is present), ARIMA search (p=1..6, q=0..1), and the optional 2021Q2–Q4 override plot (includes MA(4)). Outputs land in `outputs/data/` and `outputs/figures/`.
+Generates:
+- AR(3)/AR(4) vs spreadsheet expectations.
+- 4-quarter moving average of q/q annualized inflation (current+3 lags), 4-quarter moving average of YoY inflation, and a Box–Jenkins MA(4) model forecast (rolling ARIMA(0,0,4)).
+- SPF CPI 1Y/10Y comparisons (if `data/Inflation.xlsx` is present).
+- ARIMA search (p=1..6, q=0..1) and the optional 2021Q2–Q4 override plot (now includes the 4Q moving average and MA(4) model series).
+
+Outputs land in `outputs/data/` and `outputs/figures/` (e.g., `inflation_expectations_ma4.png`, `inflation_expectations_ma4_qoq_only.png`, `inflation_expectations_arima101_override.png`, and `inflation_expectations_ma4.csv` containing the added series).
+
+#### r* comparison across expectation proxies
+
+```bash
+python scripts/compare_rstar_expectations.py
+```
+
+Runs the LW pipeline with reported expectations, MA(4), ARIMA(1,0,1), and SPF CPI 1Y (if available) and produces `outputs/data/rstar_expectations_comparison.csv` plus `outputs/figures/rstar_expectations_comparison.png`.
 
 ### Condensed Single-File Version
 
